@@ -1,7 +1,5 @@
 # ScholarTrack Static GitHub Pages Version
 
-This ZIP is a separate static HTML/CSS/JavaScript version for testing. It does not change your existing submitted repository or live deployment.
-
 ## Files
 - `index.html` — complete single-file frontend; no Vite build or `src` folder required.
 - Uses the Supabase JavaScript v2 CDN.
