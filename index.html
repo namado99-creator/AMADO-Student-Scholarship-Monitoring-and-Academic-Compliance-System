@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ScholarTrack | Scholarship Monitoring System</title>
+<style>
+:root{--ink:#111;--line:#222;--paper:#fff;--soft:#f4f4f4;--muted:#555;--border:#c9c9c9}
+*{box-sizing:border-box}body{margin:0;background:var(--soft);color:var(--ink);font:15px Arial,Helvetica,sans-serif}
+header{background:#fff;border-bottom:2px solid var(--ink);padding:16px 5%;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}
+h1{font-size:23px;margin:0 0 5px}h2{margin:0 0 10px;font-size:21px}h3{margin:0 0 12px;font-size:17px}.muted{color:var(--muted)}main{max-width:1200px;margin:22px auto;padding:0 16px}
+.card{background:#fff;border:1px solid var(--border);padding:20px;margin:14px 0;border-radius:5px}.auth{max-width:470px;margin:42px auto}
+label{display:block;font-weight:bold;font-size:13px;margin:12px 0 6px}input,select,textarea{width:100%;padding:10px;border:1px solid #888;border-radius:3px;background:#fff;color:#111;font:inherit}textarea{min-height:80px;resize:vertical}
+button{border:1px solid #111;border-radius:3px;padding:10px 13px;background:#111;color:#fff;font-weight:bold;cursor:pointer}button:disabled{opacity:.5;cursor:wait}button.secondary{background:#fff;color:#111}button.danger{background:#fff;color:#111;border:1px solid #111}.full{width:100%;margin-top:16px}
+.tabs,.nav,.actions{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0}.tabs button,.nav button{background:#fff;color:#111}.tabs button.active,.nav button.active{background:#111;color:#fff}
+.hidden{display:none!important}.msg{padding:11px;border:1px solid #777;background:#f7f7f7;margin:12px 0;white-space:pre-wrap;overflow-wrap:anywhere}.error{border-color:#111;font-weight:bold}.success{border-style:double}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:10px}.stat{background:#fff;border:1px solid #aaa;padding:15px}.num{font-size:27px;font-weight:bold;margin-top:8px}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 14px}.wide{grid-column:1/-1}.tablewrap{overflow:auto}table{border-collapse:collapse;width:100%;min-width:760px;font-size:13px}th,td{text-align:left;padding:10px;border-bottom:1px solid #ccc;vertical-align:top}th{background:#eee;border-top:1px solid #bbb}.pill{display:inline-block;border:1px solid #777;padding:3px 7px;font-size:11px;border-radius:12px}.foot{text-align:center;color:#555;font-size:12px;padding:22px}.note{font-size:12px;line-height:1.5;color:#444}.filters{display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px;margin:14px 0}.small{font-size:12px}.inline{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.inline input{width:auto}.record-actions{display:flex;gap:5px;flex-wrap:wrap}.record-actions button{padding:7px 9px;font-size:12px}
+@media(max-width:650px){.grid,.filters{grid-template-columns:1fr}.wide{grid-column:auto}.auth{margin:22px auto}.card{padding:15px}header{padding:14px 16px}}
+</style>
+</head>
+<body>
+<header>
+  <div><h1>ScholarTrack</h1><div class="muted">Scholarship Monitoring System</div></div>
+  <div id="userbar" class="hidden inline"><span id="who"></span><button id="logout" class="secondary">Sign Out</button></div>
+</header>
+
+<div id="authView">
+  <section class="card auth">
+    <h2>ScholarTrack</h2><p class="muted">Submit and track academic records; staff verify, evaluate, and decide.</p>
+    <div class="tabs"><button id="signTab" class="active" type="button">Sign In</button><button id="createTab" type="button">Register Scholar</button></div>
+    <form id="authForm">
+      <div id="nameGroup" class="hidden"><label for="fullName">Full Name</label><input id="fullName" autocomplete="name"></div>
+      <label for="email">Email Address</label><input id="email" type="email" autocomplete="username" required>
+      <label for="password">Password</label><input id="password" type="password" minlength="6" autocomplete="current-password" required>
+      <div id="studentGroup" class="hidden"><label for="studentId">Student ID</label><input id="studentId" autocomplete="off"></div>
+      <button class="full" id="authSubmit">Sign In</button>
+    </form>
+    <div id="authMsg" aria-live="polite"></div>
+    <p class="note">Public registration creates scholar accounts only. Staff access must be assigned securely by an administrator. Do not place a service-role key in this file.</p>
+  </section>
+</div>
+
+<main id="appView" class="hidden">
+  <div class="nav" id="nav"></div><div id="appMsg" aria-live="polite"></div>
+  <section id="dashboardPage"></section><section id="submissionsPage" class="hidden"></section>
+  <section id="programsPage" class="hidden"></section><section id="auditPage" class="hidden"></section>
+</main>
+<div class="foot">ScholarTrack · Scholarship Monitoring System</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+'use strict';
+// Use your Supabase Project URL and publishable/anon key here.
+// Database access must be protected by correctly configured Row Level Security policies.
+const SUPABASE_URL = 'https://iyatlzlnrlkwetfmmgqn.supabase.co';
+const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_s1G7KoTZy5zYN74kgrtPEQ_b_R82vMu';
+const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+const $ = id => document.getElementById(id);
+let session=null, profile=null, programs=[], submissions=[], auditLogs=[], mode='signin', page='dashboard';
+let searchText='', filterStatus='all', filterYear='all';
+
+const esc = v => String(v ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const nice = v => String(v ?? '—').replaceAll('_',' ').replace(/\b\w/g,c=>c.toUpperCase());
+const stamp = v => v ? new Date(v).toLocaleString() : '—';
+function message(id,text,kind=''){ $(id).innerHTML=text?`<div class="msg ${kind}">${esc(text)}</div>`:''; }
+function failText(e){return e?.message || 'An unexpected error occurred.';}
+function authMode(m){
+  mode=m;$('signTab').classList.toggle('active',m==='signin');$('createTab').classList.toggle('active',m==='signup');
+  $('nameGroup').classList.toggle('hidden',m!=='signup');$('studentGroup').classList.toggle('hidden',m!=='signup');
+  $('fullName').required=m==='signup';$('studentId').required=m==='signup';$('authSubmit').textContent=m==='signin'?'Sign In':'Create Scholar Account';message('authMsg','');
+}
+$('signTab').onclick=()=>authMode('signin');$('createTab').onclick=()=>authMode('signup');
+
+$('authForm').onsubmit=async e=>{
+  e.preventDefault();$('authSubmit').disabled=true;message('authMsg','Please wait…');
+  try{
+    const email=$('email').value.trim(), password=$('password').value;
+    if(mode==='signin'){
+      const r=await db.auth.signInWithPassword({email,password});if(r.error)throw r.error;
+    }else{
+      const full_name=$('fullName').value.trim(), student_id=$('studentId').value.trim();
+      if(!full_name||!student_id)throw Error('Enter your full name and student ID.');
+      const r=await db.auth.signUp({email,password,options:{data:{full_name,student_id}}});if(r.error)throw r.error;
+      if(!r.data.session){message('authMsg','Account created. Confirm your email if required, then sign in.','success');return;}
+    }
+    await loadApp();
+  }catch(e){message('authMsg',failText(e),'error');}
+  finally{$('authSubmit').disabled=false;}
+};
+$('logout').onclick=async()=>{const r=await db.auth.signOut();if(r.error)message('appMsg',failText(r.error),'error');};
+
+function showAuth(){ $('authView').classList.remove('hidden');$('appView').classList.add('hidden');$('userbar').classList.add('hidden'); }
+function showApp(){
+  $('authView').classList.add('hidden');$('appView').classList.remove('hidden');$('userbar').classList.remove('hidden');
+  $('who').textContent=(profile.full_name||session.user.email)+' · '+profile.role;buildNav();
+}
+async function loadApp(){
+  const sr=await db.auth.getSession();session=sr.data.session;
+  if(!session){profile=null;showAuth();return;}
+  const r=await db.from('profiles').select('id,full_name,student_id,role').eq('id',session.user.id).maybeSingle();
+  if(r.error||!r.data){profile=null;showAuth();message('authMsg','Signed in, but no profiles row was found for this account. Create the profile row or configure your Supabase signup trigger. '+(r.error?.message||''),'error');return;}
+  profile=r.data;
+  if(!['staff','scholar'].includes(profile.role)){profile=null;showAuth();message('authMsg','This account does not have an allowed role. Ask the system administrator.','error');return;}
+  showApp();await refresh();
+}
+function buildNav(){
+  const items=[['dashboard','Dashboard'],['submissions','Submissions'],['programs','Scholarship Programs']];
+  if(profile?.role==='staff')items.push(['audit','Decision / Audit History']);
+  $('nav').innerHTML=items.map(x=>`<button type="button" data-page="${x[0]}" class="${page===x[0]?'active':''}">${x[1]}</button>`).join('');
+  $('nav').querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>setPage(b.dataset.page));
+}
+function setPage(p){page=p;['dashboard','submissions','programs','audit'].forEach(x=>$(x+'Page').classList.toggle('hidden',x!==p));buildNav();render();}
+async function refresh(){
+  message('appMsg','Loading data…');
+  const [pr,su]=await Promise.all([
+    db.from('scholarship_programs').select('*').order('name'),
+    db.from('academic_submissions').select('*').order('created_at',{ascending:false})
+  ]);
+  if(pr.error){programs=[];message('appMsg','Could not load programs: '+pr.error.message,'error');}
+  else programs=pr.data||[];
+  if(su.error){submissions=[];message('appMsg','Could not load submissions: '+su.error.message,'error');}
+  else submissions=su.data||[];
+  if(profile.role==='staff'){
+    const ar=await db.from('audit_logs').select('*').order('created_at',{ascending:false}).limit(200);
+    auditLogs=ar.data||[];
+    if(ar.error)message('appMsg','Could not load audit history: '+ar.error.message,'error');
+  }
+  if(!$('appMsg').textContent.includes('Could not'))message('appMsg','');
+  render();
+}
+function visibleRows(){
+  let rows=profile.role==='staff'?submissions:submissions.filter(s=>s.scholar_id===profile.id);
+  if(filterStatus!=='all')rows=rows.filter(s=>s.status===filterStatus||s.compliance_result===filterStatus||s.renewal_decision===filterStatus);
+  if(filterYear!=='all')rows=rows.filter(s=>s.academic_year===filterYear);
+  if(searchText){const q=searchText.toLowerCase();rows=rows.filter(s=>[s.scholar_name,s.student_id,s.academic_year,s.semester,s.status,s.compliance_result,s.renewal_decision,programName(s.program_id)].some(v=>String(v??'').toLowerCase().includes(q)));}
+  return rows;
+}
+function programName(id){const p=programs.find(x=>x.id===id);return p?.name||'Unknown program';}
+function logAction(submissionId,action,details){
+  return db.from('audit_logs').insert({actor_id:profile.id,submission_id:submissionId||null,action,details:typeof details==='string'?{note:details}:details});
+}
+function policyResult(s,p){
+  if(!p)return {result:'non_compliant',reasons:['Scholarship program was not found.']};
+  const reasons=[];
+  if(s.gwa!=null&&Number(s.gwa)>Number(p.max_gwa))reasons.push(`GWA ${s.gwa} exceeds allowed maximum ${p.max_gwa}.`);
+  if(Number(s.units||0)<Number(p.min_units||0))reasons.push(`Units ${s.units||0} are below minimum ${p.min_units||0}.`);
+  if(Number(s.failed_subjects||0)>Number(p.max_failed||0))reasons.push(`Failed subjects exceed maximum ${p.max_failed||0}.`);
+  if(Number(s.incomplete_subjects||0)>Number(p.max_incomplete||0))reasons.push(`Incomplete subjects exceed maximum ${p.max_incomplete||0}.`);
+  if(Number(s.dropped_subjects||0)>Number(p.max_dropped||0))reasons.push(`Dropped subjects exceed maximum ${p.max_dropped||0}.`);
+  return {result:reasons.length?'non_compliant':'compliant',reasons};
+}
+function submissionForm(s=null){
+  const editing=!!s, allowed=programs.filter(p=>p.is_active!==false);
+  return `<form id="submissionForm" data-editing="${editing?'yes':'no'}" data-id="${esc(s?.id||'')}">
+    <div class="grid">
+      <div><label>Scholarship Program</label><select name="program_id" required>${allowed.map(p=>`<option value="${esc(p.id)}" ${p.id===s?.program_id?'selected':''}>${esc(p.name)}</option>`).join('')}</select></div>
+      <div><label>Academic Year</label><input name="academic_year" required placeholder="2026-2027" value="${esc(s?.academic_year||'')}"></div>
+      <div><label>Semester</label><select name="semester" required>${['1st Semester','2nd Semester','Summer'].map(v=>`<option ${v===(s?.semester||'1st Semester')?'selected':''}>${v}</option>`).join('')}</select></div>
+      <div><label>GWA</label><input name="gwa" type="number" min="1" max="5" step=".01" value="${esc(s?.gwa??'')}" required></div>
+      <div><label>Enrolled Units</label><input name="units" type="number" min="0" step="1" value="${esc(s?.units??0)}" required></div>
+      <div><label>Failed Subjects</label><input name="failed_subjects" type="number" min="0" step="1" value="${esc(s?.failed_subjects??0)}" required></div>
+      <div><label>Incomplete Subjects</label><input name="incomplete_subjects" type="number" min="0" step="1" value="${esc(s?.incomplete_subjects??0)}" required></div>
+      <div><label>Dropped Subjects</label><input name="dropped_subjects" type="number" min="0" step="1" value="${esc(s?.dropped_subjects??0)}" required></div>
+      <div class="wide"><label>Evidence / Document URL</label><input name="evidence" type="url" placeholder="https://..." value="${esc(s?.evidence||'')}"></div>
+    </div><div class="actions"><button>${editing?'Save Corrections':'Submit Academic Record'}</button>${editing?'<button type="button" class="secondary" id="cancelEdit">Cancel</button>':''}</div>
+    <p class="note">One submission is allowed per scholar, academic year, and semester. Validation is checked against the selected program rules.</p>
+  </form>`;
+}
+function wireSubmissionForm(){
+  const f=$('submissionForm');if(!f)return;
+  $('cancelEdit')?.addEventListener('click',render);
+  f.onsubmit=async e=>{
+    e.preventDefault();const b=f.querySelector('button[type="submit"],button:not([type])');if(b)b.disabled=true;
+    try{
+      const v=Object.fromEntries(new FormData(f));const p=programs.find(x=>x.id===v.program_id);
+      if(!p)throw Error('Select an available scholarship program.');
+      const gwa=Number(v.gwa),units=Number(v.units),failed=Number(v.failed_subjects),inc=Number(v.incomplete_subjects),dropped=Number(v.dropped_subjects);
+      if(!v.academic_year.trim()||![gwa,units,failed,inc,dropped].every(Number.isFinite)||gwa<1||gwa>5||[units,failed,inc,dropped].some(n=>n<0))throw Error('Check the academic year, GWA (1.00–5.00), units, and subject counts.');
+      const payload={scholar_id:profile.id,student_id:profile.student_id||'',scholar_name:profile.full_name||session.user.email,program_id:v.program_id,academic_year:v.academic_year.trim(),semester:v.semester,gwa,units,failed_subjects:failed,incomplete_subjects:inc,dropped_subjects:dropped,evidence:v.evidence||null,submitted_at:new Date().toISOString(),updated_at:new Date().toISOString()};
+      let result;
+      if(f.dataset.editing==='yes'){
+        const old=submissions.find(x=>x.id===f.dataset.id);
+        if(!old||old.scholar_id!==profile.id||old.status!=='returned')throw Error('Only your returned submissions can be corrected.');
+        payload.status='pending';payload.compliance_result='pending';payload.renewal_decision='pending';payload.staff_notes=null;
+        result=await db.from('academic_submissions').update(payload).eq('id',old.id).eq('scholar_id',profile.id).select('id').single();
+        if(result.error)throw result.error;
+        const lr=await logAction(old.id,'submission_resubmitted',{from:'returned',to:'pending'});if(lr.error)throw lr.error;
+      }else{
+        payload.status='pending';payload.compliance_result='pending';payload.renewal_decision='pending';
+        result=await db.from('academic_submissions').insert(payload).select('id').single();
+        if(result.error)throw result.error;
+        const lr=await logAction(result.data.id,'submission_created',{academic_year:payload.academic_year,semester:payload.semester});if(lr.error)throw lr.error;
+      }
+      message('appMsg','Academic record saved.','success');await refresh();page='submissions';setPage('submissions');
+    }catch(err){message('appMsg',failText(err),'error');if(b)b.disabled=false;}
+  };
+}
+function table(rows,staff=false){
+  if(!rows.length)return '<p class="muted">No submissions to display.</p>';
+  return `<div class="tablewrap"><table><thead><tr>${staff?'<th>Scholar</th>':''}<th>Program</th><th>Year</th><th>Semester</th><th>GWA</th><th>Units</th><th>Status</th><th>Compliance</th><th>Renewal Decision</th><th>Submitted</th>${staff?'<th>Staff Actions</th>':'<th>Action</th>'}</tr></thead><tbody>${rows.map(s=>`<tr>${staff?`<td>${esc(s.scholar_name||s.student_id)}<br><span class="muted">${esc(s.student_id)}</span></td>`:''}<td>${esc(programName(s.program_id))}</td><td>${esc(s.academic_year)}</td><td>${esc(s.semester)}</td><td>${esc(s.gwa??'—')}</td><td>${esc(s.units??0)}</td><td><span class="pill">${esc(nice(s.status))}</span></td><td><span class="pill">${esc(nice(s.compliance_result))}</span></td><td><span class="pill">${esc(nice(s.renewal_decision))}</span></td><td>${esc(stamp(s.submitted_at||s.created_at))}</td><td><div class="record-actions">${staff?`<button data-review="${esc(s.id)}">Review</button><button class="secondary" data-return="${esc(s.id)}">Return</button>`:s.status==='returned'?`<button data-correct="${esc(s.id)}">Correct / Resubmit</button>`:'—'}</div></td></tr>`).join('')}</tbody></table></div>`;
+}
+async function reviewSubmission(id,returnOnly=false){
+  const s=submissions.find(x=>x.id===id);if(!s)return;
+  if(profile.role!=='staff')return;
+  let status,compliance,renewal,notes;
+  if(returnOnly){
+    notes=prompt('Reason for returning this submission for correction:',s.staff_notes||'Please correct the submitted information.');
+    if(notes===null)return;if(!notes.trim())return message('appMsg','A correction reason is required.','error');
+    status='returned';compliance=s.compliance_result||'pending';renewal=s.renewal_decision||'pending';
+  }else{
+    status=prompt('Verification status: pending, under_review, verified, returned',s.status||'pending');if(status===null)return;
+    if(!['pending','under_review','verified','returned'].includes(status))return message('appMsg','Invalid verification status.','error');
+    const p=programs.find(x=>x.id===s.program_id),pol=policyResult(s,p);
+    compliance=prompt(`Policy result: pending, compliant, non_compliant\nAutomatic policy check: ${pol.result}\n${pol.reasons.join('\n')||'No policy deficiency detected.'}`,s.compliance_result||pol.result);
+    if(compliance===null)return;if(!['pending','compliant','non_compliant'].includes(compliance))return message('appMsg','Invalid compliance result.','error');
+    renewal=prompt('Renewal decision: pending, approved, denied',s.renewal_decision||'pending');
+    if(renewal===null)return;if(!['pending','approved','denied'].includes(renewal))return message('appMsg','Invalid renewal decision.','error');
+    notes=prompt('Staff notes / decision reason (required if returning or denying):',s.staff_notes||pol.reasons.join(' '));
+    if(notes===null)return;if((status==='returned'||renewal==='denied')&&!notes.trim())return message('appMsg','Enter the reason for returning or denying this submission.','error');
+  }
+  const updates={status,compliance_result:compliance,renewal_decision:renewal,staff_notes:notes||null,reviewed_by:profile.id,reviewed_at:new Date().toISOString(),updated_at:new Date().toISOString()};
+  const r=await db.from('academic_submissions').update(updates).eq('id',id).select('id').single();
+  if(r.error)return message('appMsg',r.error.message,'error');
+  const lr=await logAction(id,returnOnly?'submission_returned_for_correction':'submission_reviewed',{status,compliance_result:compliance,renewal_decision:renewal,notes:notes||''});
+  if(lr.error)message('appMsg','Record updated, but audit logging failed: '+lr.error.message,'error');
+  await refresh();
+}
+function renderPrograms(){
+  const staff=profile.role==='staff';
+  $('programsPage').innerHTML=`<div class="card"><h2>Scholarship Programs</h2><p class="muted">Program policy rules are used when evaluating academic compliance.</p>${programs.length?`<div class="tablewrap"><table><thead><tr><th>Program</th><th>Maximum GWA</th><th>Minimum Units</th><th>Max Failed</th><th>Max Incomplete</th><th>Max Dropped</th><th>Active</th>${staff?'<th>Action</th>':''}</tr></thead><tbody>${programs.map(p=>`<tr><td><b>${esc(p.name)}</b><br>${esc(p.description||'')}</td><td>${esc(p.max_gwa??'—')}</td><td>${esc(p.min_units??'—')}</td><td>${esc(p.max_failed??'—')}</td><td>${esc(p.max_incomplete??'—')}</td><td>${esc(p.max_dropped??'—')}</td><td>${p.is_active===false?'No':'Yes'}</td>${staff?`<td><button data-edit-program="${esc(p.id)}" class="secondary">Edit</button></td>`:''}</tr>`).join('')}</tbody></table></div>`:'No programs found.'}</div>
+  ${staff?`<div class="card"><h3 id="programFormTitle">Add Scholarship Program</h3><form id="programForm"><input type="hidden" name="id"><div class="grid"><div><label>Program Name</label><input name="name" required></div><div><label>Maximum GWA (e.g. 2.00)</label><input name="max_gwa" type="number" min="1" max="5" step=".01" required></div><div><label>Minimum Units</label><input name="min_units" type="number" min="0" required value="0"></div><div><label>Maximum Failed Subjects</label><input name="max_failed" type="number" min="0" required value="0"></div><div><label>Maximum Incomplete Subjects</label><input name="max_incomplete" type="number" min="0" required value="0"></div><div><label>Maximum Dropped Subjects</label><input name="max_dropped" type="number" min="0" required value="0"></div><div class="wide"><label>Description</label><textarea name="description"></textarea></div><div class="wide inline"><input type="checkbox" name="is_active" checked><label for="is_active" style="margin:0">Program is active</label></div></div><div class="actions"><button>Save Program</button><button type="button" id="resetProgram" class="secondary">Clear</button></div></form></div>`:''}`;
+  if(!staff)return;
+  const f=$('programForm');
+  f.onsubmit=async e=>{
+    e.preventDefault();const v=Object.fromEntries(new FormData(f));const id=v.id;
+    const payload={name:v.name.trim(),description:v.description.trim()||null,max_gwa:Number(v.max_gwa),min_units:Number(v.min_units),max_failed:Number(v.max_failed),max_incomplete:Number(v.max_incomplete),max_dropped:Number(v.max_dropped),is_active:f.elements.is_active.checked,updated_at:new Date().toISOString()};
+    try{let r=id?await db.from('scholarship_programs').update(payload).eq('id',id):await db.from('scholarship_programs').insert(payload);
+      if(r.error)throw r.error;const lr=await logAction(null,id?'program_updated':'program_created',{name:payload.name});if(lr.error)throw lr.error;
+      f.reset();f.elements.id.value='';await refresh();setPage('programs');
+    }catch(err){message('appMsg',failText(err),'error');}
+  };
+  $('resetProgram').onclick=()=>{f.reset();f.elements.id.value='';$('programFormTitle').textContent='Add Scholarship Program';};
+  $('programsPage').querySelectorAll('[data-edit-program]').forEach(b=>b.onclick=()=>{
+    const p=programs.find(x=>x.id===b.dataset.editProgram);if(!p)return;
+    for(const key of ['id','name','description','max_gwa','min_units','max_failed','max_incomplete','max_dropped'])f.elements[key].value=p[key]??'';
+    f.elements.is_active.checked=p.is_active!==false;$('programFormTitle').textContent='Edit Scholarship Program';f.scrollIntoView({behavior:'smooth',block:'start'});
+  });
+}
+function renderAudit(){
+  $('auditPage').innerHTML=`<div class="card"><h2>Decision / Audit History</h2><p class="muted">Logged actions from submissions and program policy maintenance.</p>${auditLogs.length?`<div class="tablewrap"><table><thead><tr><th>Date and Time</th><th>Action</th><th>Submission ID</th><th>Actor ID</th><th>Details</th></tr></thead><tbody>${auditLogs.map(a=>`<tr><td>${esc(stamp(a.created_at))}</td><td>${esc(nice(a.action))}</td><td>${esc(a.submission_id||'—')}</td><td>${esc(a.actor_id||'—')}</td><td><pre style="white-space:pre-wrap;margin:0;font:12px Arial">${esc(typeof a.details==='string'?a.details:JSON.stringify(a.details||{},null,2))}</pre></td></tr>`).join('')}</tbody></table></div>`:'No audit history found. Actions will appear here when audit_logs insert/select policies permit access.'}</div>`;
+}
+function render(){
+  if(!profile)return;
+  const rows=visibleRows();
+  if(page==='dashboard'){
+    const own=profile.role==='staff'?submissions:submissions.filter(s=>s.scholar_id===profile.id);
+    $('dashboardPage').innerHTML=`<div class="card"><h2>Dashboard</h2><p>Welcome, <b>${esc(profile.full_name||session.user.email)}</b>.</p><p class="muted">${profile.role==='staff'?'Review scholar submissions, apply program rules, and record renewal decisions.':'Submit academic records, check their status, and correct records returned by staff.'}</p><button id="refreshBtn" class="secondary">Refresh Data</button></div>
+    <div class="stats"><div class="stat">Total submissions<div class="num">${own.length}</div></div><div class="stat">Pending / Under Review<div class="num">${own.filter(s=>['pending','under_review'].includes(s.status)).length}</div></div><div class="stat">Verified<div class="num">${own.filter(s=>s.status==='verified').length}</div></div><div class="stat">Non-compliant<div class="num">${own.filter(s=>s.compliance_result==='non_compliant').length}</div></div></div>
+    <div class="card"><h3>Recent Submissions</h3>${table(own.slice(0,8),profile.role==='staff')}</div>
+    ${profile.role==='scholar'?`<div class="card"><h3>Submit Academic Record</h3>${submissionForm()}</div>`:''}`;
+    $('refreshBtn').onclick=refresh;wireSubmissionForm();$('dashboardPage').querySelectorAll('[data-review]').forEach(b=>b.onclick=()=>reviewSubmission(b.dataset.review));$('dashboardPage').querySelectorAll('[data-return]').forEach(b=>b.onclick=()=>reviewSubmission(b.dataset.return,true));$('dashboardPage').querySelectorAll('[data-correct]').forEach(b=>b.onclick=()=>editReturned(b.dataset.correct));
+  }
+  if(page==='submissions'){
+    const years=[...new Set((profile.role==='staff'?submissions:submissions.filter(s=>s.scholar_id===profile.id)).map(s=>s.academic_year).filter(Boolean))].sort().reverse();
+    $('submissionsPage').innerHTML=`<div class="card"><h2>Submissions</h2><p class="muted">${profile.role==='staff'?'Search, verify evidence, evaluate compliance, return records, and record renewal decisions.':'View your records and correct submissions returned by staff.'}</p><div class="filters"><input id="searchInput" placeholder="Search scholar, student ID, program, year…" value="${esc(searchText)}"><select id="statusFilter"><option value="all">All statuses</option>${['pending','under_review','verified','returned','compliant','non_compliant','approved','denied'].map(x=>`<option value="${x}" ${filterStatus===x?'selected':''}>${nice(x)}</option>`).join('')}</select><select id="yearFilter"><option value="all">All academic years</option>${years.map(y=>`<option ${filterYear===y?'selected':''}>${esc(y)}</option>`).join('')}</select></div>${table(rows,profile.role==='staff')}</div>${profile.role==='scholar'?`<div class="card"><h3>New Academic Submission</h3>${submissionForm()}</div>`:''}`;
+    $('searchInput').oninput=e=>{searchText=e.target.value;render();const el=$('searchInput');el.focus();el.setSelectionRange(searchText.length,searchText.length);};
+    $('statusFilter').onchange=e=>{filterStatus=e.target.value;render()};$('yearFilter').onchange=e=>{filterYear=e.target.value;render()};
+    wireSubmissionForm();$('submissionsPage').querySelectorAll('[data-review]').forEach(b=>b.onclick=()=>reviewSubmission(b.dataset.review));$('submissionsPage').querySelectorAll('[data-return]').forEach(b=>b.onclick=()=>reviewSubmission(b.dataset.return,true));$('submissionsPage').querySelectorAll('[data-correct]').forEach(b=>b.onclick=()=>editReturned(b.dataset.correct));
+  }
+  if(page==='programs')renderPrograms();
+  if(page==='audit'&&profile.role==='staff')renderAudit();
+}
+function editReturned(id){
+  const s=submissions.find(x=>x.id===id);if(!s||s.scholar_id!==profile.id||s.status!=='returned')return;
+  page='submissions';setPage('submissions');
+  const oldForm=$('submissionsPage').querySelector('#submissionForm');
+  if(oldForm){oldForm.outerHTML=submissionForm(s);wireSubmissionForm();$('submissionsPage').querySelector('#submissionForm').scrollIntoView({behavior:'smooth',block:'center'});}
+}
+db.auth.onAuthStateChange((_event,newSession)=>{session=newSession;setTimeout(()=>loadApp().catch(e=>message('authMsg',failText(e),'error')),0);});
+(async()=>{try{await loadApp();}catch(e){message('authMsg',failText(e),'error');}})();
+</script>
+</body>
+</html>
