@@ -1,4 +1,4 @@
-# ScholarTrack Static GitHub Pages Version
+# ScholarTrack
 
 ## Files
 - `index.html` — complete single-file frontend; no Vite build or `src` folder required.
